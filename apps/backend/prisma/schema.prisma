@@ -1,0 +1,174 @@
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+enum Rol {
+  ADMIN     @map("admin")
+  VENDEDOR  @map("vendedor")
+  BODEGA    @map("bodega")
+  CLIENTE   @map("cliente")
+
+  @@map("rol_enum")
+}
+
+enum UbicacionTipo {
+  BODEGA  @map("bodega")
+  TIENDA  @map("tienda")
+
+  @@map("ubicacion_tipo_enum")
+}
+
+enum MovimientoTipo {
+  ENTRADA    @map("entrada")
+  SALIDA     @map("salida")
+  AJUSTE     @map("ajuste")
+  TRASLADO   @map("traslado")
+  DEVOLUCION @map("devolucion")
+
+  @@map("movimiento_tipo_enum")
+}
+
+model Usuario {
+  id            String    @id @default(uuid()) @db.Uuid
+  nombre        String
+  email         String    @unique
+  passwordHash  String    @map("password_hash")
+  rol           Rol       @default(CLIENTE)
+  activo        Boolean   @default(true)
+  createdAt     DateTime  @default(now()) @map("created_at")
+  updatedAt     DateTime  @updatedAt @map("updated_at")
+
+  movimientos   MovimientoInventario[]
+
+  @@map("usuario")
+}
+
+model Ubicacion {
+  id                     String                 @id @default(uuid()) @db.Uuid
+  nombre                 String
+  tipo                   UbicacionTipo
+  direccion              String?
+  activo                 Boolean                @default(true)
+  createdAt              DateTime               @default(now()) @map("created_at")
+
+  movimientosOrigen      MovimientoInventario[] @relation("MovimientoOrigen")
+  movimientosDestino     MovimientoInventario[] @relation("MovimientoDestino")
+  saldos                 SaldoInventario[]
+
+  @@map("ubicacion")
+}
+
+model Categoria {
+  id                String      @id @default(uuid()) @db.Uuid
+  nombre            String
+  descripcion       String?
+  categoriaPadreId  String?     @map("categoria_padre_id") @db.Uuid
+  activo            Boolean     @default(true)
+
+  categoriaPadre    Categoria?  @relation("JerarquiaCategoria", fields: [categoriaPadreId], references: [id])
+  subcategorias     Categoria[] @relation("JerarquiaCategoria")
+  productos         Producto[]
+
+  @@map("categoria")
+}
+
+model Producto {
+  id             String            @id @default(uuid()) @db.Uuid
+  nombre         String
+  descripcion    String?
+  categoriaId    String            @map("categoria_id") @db.Uuid
+  visiblePublico Boolean           @default(false) @map("visible_publico")
+  createdAt      DateTime          @default(now()) @map("created_at")
+  updatedAt      DateTime          @updatedAt @map("updated_at")
+
+  categoria      Categoria         @relation(fields: [categoriaId], references: [id])
+  imagenes       ImagenProducto[]
+  variantes      VarianteSku[]
+
+  @@map("producto")
+}
+
+model ImagenProducto {
+  id          String       @id @default(uuid()) @db.Uuid
+  productoId  String       @map("producto_id") @db.Uuid
+  varianteId  String?      @map("variante_id") @db.Uuid
+  urlStorage  String       @map("url_storage")
+  orden       Int          @default(0)
+
+  producto    Producto     @relation(fields: [productoId], references: [id], onDelete: Cascade)
+  variante    VarianteSku? @relation(fields: [varianteId], references: [id], onDelete: SetNull)
+
+  @@map("imagen_producto")
+}
+
+model VarianteSku {
+  id               String                 @id @default(uuid()) @db.Uuid
+  productoId       String                 @map("producto_id") @db.Uuid
+  skuCode          String                 @unique @map("sku_code")
+  talla            String
+  color            String
+  atributoOpcional String?                @map("atributo_opcional")
+  barcode          String?                @unique
+  activo           Boolean                @default(true)
+
+  producto         Producto               @relation(fields: [productoId], references: [id], onDelete: Cascade)
+  imagenes         ImagenProducto[]
+  precios          PrecioHistorico[]
+  movimientos      MovimientoInventario[]
+  saldos           SaldoInventario[]
+
+  @@map("variante_sku")
+}
+
+model PrecioHistorico {
+  id           String      @id @default(uuid()) @db.Uuid
+  varianteId   String      @map("variante_id") @db.Uuid
+  precio       Decimal     @db.Decimal(12, 2)
+  vigenteDesde DateTime    @default(now()) @map("vigente_desde")
+  vigenteHasta DateTime?   @map("vigente_hasta")
+
+  variante     VarianteSku @relation(fields: [varianteId], references: [id], onDelete: Cascade)
+
+  @@map("precio_historico")
+}
+
+model MovimientoInventario {
+  id                     String                @id @default(uuid()) @db.Uuid
+  varianteId             String                @map("variante_id") @db.Uuid
+  ubicacionId            String                @map("ubicacion_id") @db.Uuid
+  ubicacionDestinoId     String?               @map("ubicacion_destino_id") @db.Uuid
+  tipo                   MovimientoTipo
+  cantidad               Int
+  motivo                 String?
+  usuarioId              String                @map("usuario_id") @db.Uuid
+  idempotencyKey         String                @unique @map("idempotency_key")
+  movimientoReferenciaId String?               @map("movimiento_referencia_id") @db.Uuid
+  timestamp              DateTime              @default(now())
+
+  variante               VarianteSku           @relation(fields: [varianteId], references: [id])
+  ubicacion              Ubicacion             @relation("MovimientoOrigen", fields: [ubicacionId], references: [id])
+  ubicacionDestino       Ubicacion?            @relation("MovimientoDestino", fields: [ubicacionDestinoId], references: [id])
+  usuario                Usuario               @relation(fields: [usuarioId], references: [id])
+  movimientoReferencia   MovimientoInventario? @relation("CorreccionMovimiento", fields: [movimientoReferenciaId], references: [id])
+  movimientosCorregidos  MovimientoInventario[] @relation("CorreccionMovimiento")
+
+  @@map("movimiento_inventario")
+}
+
+model SaldoInventario {
+  varianteId  String      @map("variante_id") @db.Uuid
+  ubicacionId String      @map("ubicacion_id") @db.Uuid
+  cantidad    Int         @default(0)
+  updatedAt   DateTime    @updatedAt @map("updated_at")
+
+  variante    VarianteSku @relation(fields: [varianteId], references: [id], onDelete: Cascade)
+  ubicacion   Ubicacion   @relation(fields: [ubicacionId], references: [id], onDelete: Cascade)
+
+  @@id([varianteId, ubicacionId])
+  @@map("saldo_inventario")
+}
