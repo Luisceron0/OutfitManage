@@ -12,12 +12,17 @@ import { Type } from 'class-transformer';
 import { ApiPropertyOptional } from '@nestjs/swagger';
 
 export class UpdateVarianteDto {
-  @ApiPropertyOptional({ description: 'ID de la variante existente (omitir para nuevas)' })
+  @ApiPropertyOptional({
+    description: 'ID de la variante existente (omitir para nuevas)',
+  })
   @IsOptional()
   @IsString()
   id?: string;
 
-  @ApiPropertyOptional({ description: 'Código SKU único', example: 'CAM-NEG-M' })
+  @ApiPropertyOptional({
+    description: 'Código SKU único',
+    example: 'CAM-NEG-M',
+  })
   @IsNotEmpty()
   @IsString()
   skuCode: string;
@@ -37,7 +42,9 @@ export class UpdateVarianteDto {
   @IsString()
   atributoOpcional?: string;
 
-  @ApiPropertyOptional({ description: 'URL de foto o video específico de esta variante' })
+  @ApiPropertyOptional({
+    description: 'URL de foto o video específico de esta variante',
+  })
   @IsOptional()
   @IsString()
   imagenUrl?: string;
@@ -59,14 +66,20 @@ export class UpdateVarianteDto {
   @Min(0)
   precio?: number;
 
-  @ApiPropertyOptional({ description: 'Estado activo de la variante', default: true })
+  @ApiPropertyOptional({
+    description: 'Estado activo de la variante',
+    default: true,
+  })
   @IsOptional()
   @IsBoolean()
   activo?: boolean;
 }
 
 export class UpdateProductoDto {
-  @ApiPropertyOptional({ description: 'Nombre del producto', example: 'Camiseta Premium' })
+  @ApiPropertyOptional({
+    description: 'Nombre del producto',
+    example: 'Camiseta Premium',
+  })
   @IsOptional()
   @IsString()
   nombre?: string;

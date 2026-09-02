@@ -2,7 +2,7 @@
 **Versión:** 1.0
 **Fecha:** 2026-08-18
 **Autor:** Usuario | **Revisor técnico:** Arch-Sentinel
-**Estado:** Aprobado — sin pendientes bloqueantes (v1.1)
+**Estado:** Aprobado — sin pendientes bloqueantes (v1.2)
 
 **Nombre comercial del producto:** Tienda360 (nombre de trabajo / placeholder — sin decisión de branding final; usar consistentemente en código, dominios de desarrollo y documentación hasta que se reemplace)
 
@@ -248,7 +248,7 @@ El sistema es una instalación dedicada por cliente. Actores externos: **Visitan
 - **Backend API (monolito modular, NestJS):** módulos de dominio — `catalogo`, `inventario`, `identidad` — expone dos superficies de contrato (`/public/*` y `/api/*`) desde el mismo proceso
 - **Paquete compartido (`@core/api-client`):** tipos TypeScript generados desde OpenAPI + lógica de negocio idéntica en web admin y móvil (generación de Idempotency-Key, validación de payload de movimiento) — ver ADR-007
 - **Base de datos:** PostgreSQL (única por instalación)
-- **Almacenamiento de imágenes:** Cloudinary (ver ADR-008) — transformación y CDN gestionados, sin pipeline propia de procesamiento de imágenes
+- **Almacenamiento de imágenes:** Supabase Storage (ver ADR-008, revisado 2026-09-02) — buckets privados con URLs firmadas, allowlist de tipo MIME real y de bucket destino en el backend
 
 ### 6.3 Decisiones de arquitectura (ADRs)
 
@@ -302,12 +302,23 @@ El sistema es una instalación dedicada por cliente. Actores externos: **Visitan
 - **Consecuencias:** Un cambio de contrato de API rompe el build de los dos frontends al mismo tiempo en CI, en vez de descubrirse en producción en uno de los dos. Configuración de monorepo agrega complejidad inicial de tooling, aceptada a cambio de esa garantía.
 - **Alternativas descartadas:** Un solo framework "universal" (ej. intentar reusar componentes web en RN vía librerías cross-platform) — descartado porque las dos superficies tienen necesidades de UX genuinamente distintas; forzar reuso de UI ahí sí sería complejidad especulativa (viola Principio de código #6 de copilot-instructions.md).
 
-#### ADR-008: Cloudinary como storage y CDN de imágenes de producto
-- **Estado:** Aceptado
+#### ADR-008: Supabase Storage como storage de imágenes y videos de producto (revisado 2026-09-02)
+- **Estado:** Aceptado — revisa la decisión original de este ADR (Cloudinary), documentada abajo en la sección "Decisión original" por trazabilidad.
+- **Contexto:** La auditoría de seguridad y funcionalidad del 2026-09-02 encontró que el código del backend (`StorageService`) nunca implementó Cloudinary: implementa Supabase Storage desde el inicio de este módulo. El SRS no se había actualizado para reflejarlo. Se revisó con el usuario si migrar el código a Cloudinary para cumplir el SRS original, o actualizar el SRS para reflejar Supabase — se optó por lo segundo, dado que Supabase Storage ya está en producción, ya fue auditado y corregido (ver hallazgos SEC-06 y SEC-07 de esa auditoría: allowlist de MIME real, extensión derivada del MIME y no del nombre de archivo del cliente, carpeta de destino saneada contra path traversal, `upsert:false`, y allowlist del bucket destino en el borrado), y fue verificado en runtime contra el proyecto Supabase real de esta instalación.
+- **Decisión:** Supabase Storage con dos buckets privados (`products_images`, `products_videos`) y URLs firmadas de corta vigencia (7 días), en vez de Cloudinary. El backend valida el tipo MIME real contra una allowlist antes de aceptar cualquier archivo; la transformación de imagen (resize, formato) queda fuera de alcance por ahora — a diferencia de Cloudinary, Supabase Storage no ofrece transformación por parámetro de URL en el plan usado por esta instalación.
+- **Consecuencias:** Se pierde la transformación de imagen gestionada que ofrecía Cloudinary (ADR original); si el volumen de imágenes o la necesidad de variantes de tamaño crece, esto requiere una pipeline propia (p. ej. `sharp` en el backend) o una migración a un CDN con transformación por URL. A cambio, se consolida el almacenamiento de datos (Postgres) y de archivos (Storage) en un solo proveedor (Supabase), reduciendo el número de servicios externos a administrar por instalación.
+- **Alternativas descartadas:** Migrar el código existente a Cloudinary para que coincidiera con el SRS original — descartada porque habría significado reescribir un módulo ya probado y corregido, sin un beneficio funcional claro para el tamaño de negocio objetivo, solo para hacer coincidir el documento con una decisión que en la práctica nunca se implementó.
+
+<details>
+<summary>Decisión original (2026-08-18), reemplazada por la de arriba</summary>
+
+- **Estado:** Reemplazado.
 - **Contexto:** Negocio con poco personal técnico operando el catálogo día a día, pero con volumen de imágenes alto (múltiples fotos por SKU × talla/color).
 - **Decisión:** Cloudinary en vez de S3/MinIO crudo. Transformación de imagen (resize, formato, compresión) por parámetro de URL, sin pipeline propia de procesamiento en el backend.
 - **Consecuencias:** Elimina código de generación de thumbnails y optimización que habría que mantener en N instalaciones. Costo por GB mayor que S3 puro a partir de cierto volumen — irrelevante al tamaño de negocio objetivo.
 - **Alternativas descartadas:** S3/MinIO + pipeline propia de resize — descartada por costo de mantenimiento operativo con equipo de 2-3 devs sobre N instalaciones. Migración a S3+CDN propio queda como salida documentada si algún cliente individual crece lo suficiente para justificarlo.
+
+</details>
 
 ### 6.4 Modelo de datos (entidades principales)
 
@@ -502,6 +513,7 @@ Relaciones clave: `Producto 1—N Variante`, `Variante 1—N MovimientoInventari
 |---------|-------|-------|---------|
 | 1.0 | 2026-08-18 | Usuario + Arch-Sentinel | Versión inicial aprobada. Arquitectura: monolito modular (ADR-001). Alcance excluye POS/DIAN (ADR-006). |
 | 1.1 | 2026-08-18 | Usuario + Arch-Sentinel | Cierre de pendientes: stack definitivo (NestJS + Next.js + React Native/Expo, ADR-007), storage de imágenes (Cloudinary, ADR-008), matriz de permisos por rol, SLA y volumen de datos como parámetros de onboarding por instalación, notificaciones push confirmado fuera de alcance, nombre de trabajo asignado (Tienda360). Sin pendientes abiertos que bloqueen inicio de desarrollo. |
+| 1.2 | 2026-09-02 | Auditoría de seguridad y funcionalidad | ADR-008 revisado: el storage real de producción es Supabase Storage, no Cloudinary (el código nunca implementó Cloudinary); se documenta la decisión real y se preserva la original por trazabilidad. Corregidos en código y verificados en runtime: escalada de privilegios en el registro público (rol asignable por el cliente), secreto JWT y credenciales de administrador hardcodeadas, CORS permisivo, RBAC fail-open, validación de subida/borrado de archivos, comparación de contraseña en texto plano, paginación sin cota, fuga de stock exacto en el catálogo público. Ver `Markdowns/todo.md` (sección "Revisión") y `Markdowns/lessons.md` para el detalle completo. |
 
 ---
 

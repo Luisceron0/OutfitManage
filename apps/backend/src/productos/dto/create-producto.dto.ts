@@ -3,13 +3,11 @@ import {
   IsNotEmpty,
   IsString,
   IsOptional,
-  IsUUID,
   IsBoolean,
   IsArray,
   ValidateNested,
   IsNumber,
   Min,
-  IsInt,
 } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
@@ -29,23 +27,35 @@ export class CreateVarianteDto {
   @IsString()
   color: string;
 
-  @ApiPropertyOptional({ description: 'Atributo adicional (material, estilo, etc.)', example: 'Algodón' })
+  @ApiPropertyOptional({
+    description: 'Atributo adicional (material, estilo, etc.)',
+    example: 'Algodón',
+  })
   @IsOptional()
   @IsString()
   atributoOpcional?: string;
 
-  @ApiPropertyOptional({ description: 'URL de foto o video específico de esta variante', example: 'products_images/123.jpg' })
+  @ApiPropertyOptional({
+    description: 'URL de foto o video específico de esta variante',
+    example: 'products_images/123.jpg',
+  })
   @IsOptional()
   @IsString()
   imagenUrl?: string;
 
-  @ApiPropertyOptional({ description: 'URLs de fotos y videos de la variante', example: ['products_images/1.jpg', 'products_images/2.jpg'] })
+  @ApiPropertyOptional({
+    description: 'URLs de fotos y videos de la variante',
+    example: ['products_images/1.jpg', 'products_images/2.jpg'],
+  })
   @IsOptional()
   @IsArray()
   @IsString({ each: true })
   imagenes?: string[];
 
-  @ApiPropertyOptional({ description: 'Código de barras', example: '7701234567890' })
+  @ApiPropertyOptional({
+    description: 'Código de barras',
+    example: '7701234567890',
+  })
   @IsOptional()
   @IsString()
   barcode?: string;
@@ -56,25 +66,37 @@ export class CreateVarianteDto {
   @Min(0)
   precio: number;
 
-  @ApiPropertyOptional({ description: 'Stock inicial de la variante', example: 20 })
+  @ApiPropertyOptional({
+    description: 'Stock inicial de la variante',
+    example: 20,
+  })
   @IsOptional()
   @IsNumber()
   @Min(0)
   stockInicial?: number;
 
-  @ApiPropertyOptional({ description: 'ID de la ubicación para el stock inicial', example: 'uuid' })
+  @ApiPropertyOptional({
+    description: 'ID de la ubicación para el stock inicial',
+    example: 'uuid',
+  })
   @IsOptional()
   @IsString()
   ubicacionInicialId?: string;
 }
 
 export class CreateProductoDto {
-  @ApiProperty({ description: 'Nombre del producto', example: 'Camiseta Básica' })
+  @ApiProperty({
+    description: 'Nombre del producto',
+    example: 'Camiseta Básica',
+  })
   @IsNotEmpty()
   @IsString()
   nombre: string;
 
-  @ApiPropertyOptional({ description: 'Descripción del producto', example: 'Camiseta de algodón 100%' })
+  @ApiPropertyOptional({
+    description: 'Descripción del producto',
+    example: 'Camiseta de algodón 100%',
+  })
   @IsOptional()
   @IsString()
   descripcion?: string;
@@ -84,13 +106,17 @@ export class CreateProductoDto {
   @IsString()
   categoriaId: string;
 
-  @ApiPropertyOptional({ description: 'Visible en catálogo público', default: false })
+  @ApiPropertyOptional({
+    description: 'Visible en catálogo público',
+    default: false,
+  })
   @IsOptional()
   @IsBoolean()
   visiblePublico?: boolean;
 
   @ApiPropertyOptional({
-    description: 'URLs o rutas en Supabase Storage de imágenes/videos del producto',
+    description:
+      'URLs o rutas en Supabase Storage de imágenes/videos del producto',
     example: ['products_images/123.jpg'],
   })
   @IsOptional()
@@ -98,7 +124,10 @@ export class CreateProductoDto {
   @IsString({ each: true })
   imagenes?: string[];
 
-  @ApiProperty({ description: 'Lista de variantes (SKUs) del producto', type: [CreateVarianteDto] })
+  @ApiProperty({
+    description: 'Lista de variantes (SKUs) del producto',
+    type: [CreateVarianteDto],
+  })
   @IsArray()
   @ValidateNested({ each: true })
   @Type(() => CreateVarianteDto)

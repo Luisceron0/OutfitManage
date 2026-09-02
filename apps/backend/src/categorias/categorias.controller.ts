@@ -1,4 +1,13 @@
-import { Controller, Get, Post, Patch, Delete, Body, Param, UseGuards } from '@nestjs/common';
+import {
+  Controller,
+  Get,
+  Post,
+  Patch,
+  Delete,
+  Body,
+  Param,
+  UseGuards,
+} from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import { CategoriasService } from './categorias.service';
 import { CreateCategoriaDto } from './dto/create-categoria.dto';
@@ -10,6 +19,7 @@ import { Roles } from '../common/decorators/roles.decorator';
 @ApiTags('Categorías')
 @ApiBearerAuth()
 @UseGuards(JwtAuthGuard, RbacGuard)
+@Roles('ADMIN', 'VENDEDOR', 'BODEGA')
 @Controller('api/categorias')
 export class CategoriasController {
   constructor(private readonly categoriasService: CategoriasService) {}

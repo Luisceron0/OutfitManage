@@ -156,7 +156,6 @@ export default function CatalogoPage() {
       })),
       disponible: v.disponible,
       stockStatus: v.stockStatus,
-      stockRestante: v.stockRestante,
     }));
 
     return {

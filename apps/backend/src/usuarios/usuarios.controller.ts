@@ -10,7 +10,12 @@ import {
   UseGuards,
   ParseUUIDPipe,
 } from '@nestjs/common';
-import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth } from '@nestjs/swagger';
+import {
+  ApiTags,
+  ApiOperation,
+  ApiResponse,
+  ApiBearerAuth,
+} from '@nestjs/swagger';
 import { UsuariosService } from './usuarios.service';
 import { CreateUsuarioDto } from './dto/create-usuario.dto';
 import { UpdateUsuarioDto } from './dto/update-usuario.dto';
@@ -30,9 +35,13 @@ export class UsuariosController {
   @Get()
   @ApiOperation({
     summary: 'Listar usuarios registrados',
-    description: 'Retorna usuarios con paginación, búsqueda por texto y filtros por rol. Exclusivo para administradores.',
+    description:
+      'Retorna usuarios con paginación, búsqueda por texto y filtros por rol. Exclusivo para administradores.',
   })
-  @ApiResponse({ status: 200, description: 'Listado de usuarios obtenido exitosamente' })
+  @ApiResponse({
+    status: 200,
+    description: 'Listado de usuarios obtenido exitosamente',
+  })
   findAll(@Query() query: QueryUsuarioDto) {
     return this.usuariosService.findAll(query);
   }
@@ -51,7 +60,8 @@ export class UsuariosController {
   @Post()
   @ApiOperation({
     summary: 'Crear nuevo usuario',
-    description: 'Registra un usuario desde el panel administrativo asignando rol y contraseña.',
+    description:
+      'Registra un usuario desde el panel administrativo asignando rol y contraseña.',
   })
   @ApiResponse({ status: 201, description: 'Usuario creado exitosamente' })
   @ApiResponse({ status: 409, description: 'El correo electrónico ya existe' })
@@ -62,7 +72,8 @@ export class UsuariosController {
   @Patch(':id')
   @ApiOperation({
     summary: 'Actualizar usuario',
-    description: 'Permite modificar nombre, email, rol, estado activo o restablecer la contraseña.',
+    description:
+      'Permite modificar nombre, email, rol, estado activo o restablecer la contraseña.',
   })
   @ApiResponse({ status: 200, description: 'Usuario actualizado exitosamente' })
   @ApiResponse({ status: 404, description: 'Usuario no encontrado' })
@@ -86,10 +97,14 @@ export class UsuariosController {
   @Delete(':id')
   @ApiOperation({
     summary: 'Eliminar usuario',
-    description: 'Elimina un usuario si no cuenta con movimientos de inventario asociados.',
+    description:
+      'Elimina un usuario si no cuenta con movimientos de inventario asociados.',
   })
   @ApiResponse({ status: 200, description: 'Usuario eliminado exitosamente' })
-  @ApiResponse({ status: 400, description: 'No se puede eliminar por tener movimientos asociados' })
+  @ApiResponse({
+    status: 400,
+    description: 'No se puede eliminar por tener movimientos asociados',
+  })
   remove(@Param('id', ParseUUIDPipe) id: string) {
     return this.usuariosService.remove(id);
   }

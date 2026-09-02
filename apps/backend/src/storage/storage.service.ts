@@ -1,6 +1,18 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, BadRequestException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { createClient, SupabaseClient } from '@supabase/supabase-js';
+import { createClient } from '@supabase/supabase-js';
+
+// Allowlist de tipos MIME reales aceptados. La extensión de archivo se deriva de esta tabla,
+// nunca del nombre de archivo declarado por el cliente (ver SEC-07 de la auditoría).
+const ALLOWED_MIME_TO_EXT: Record<string, string> = {
+  'image/jpeg': 'jpg',
+  'image/png': 'png',
+  'image/webp': 'webp',
+  'image/gif': 'gif',
+  'video/mp4': 'mp4',
+  'video/webm': 'webm',
+  'video/quicktime': 'mov',
+};
 
 export interface UploadedMulterFile {
   fieldname?: string;
@@ -23,29 +35,35 @@ export interface UploadResult {
 @Injectable()
 export class StorageService {
   private readonly logger = new Logger(StorageService.name);
-  private supabase: SupabaseClient;
+  // Se tipa desde el propio retorno de createClient (en vez de anotar `SupabaseClient`
+  // explícitamente) para evitar un desajuste de parámetros genéricos entre versiones del SDK.
+  private supabase: ReturnType<typeof createClient>;
   private readonly imagesBucket: string;
   private readonly videosBucket: string;
 
   constructor(private configService: ConfigService) {
-    const supabaseUrl =
-      this.configService.get<string>('SUPABASE_URL') ||
-      'https://your-project.supabase.co';
-    const supabaseKey =
-      this.configService.get<string>('SUPABASE_KEY') ||
-      'your-supabase-service-role-or-anon-key';
+    const supabaseUrl = this.configService.get<string>('SUPABASE_URL');
+    const supabaseKey = this.configService.get<string>('SUPABASE_KEY');
+
+    if (!supabaseUrl || !supabaseKey) {
+      throw new Error(
+        'SUPABASE_URL y SUPABASE_KEY deben estar configurados. No hay valor por defecto.',
+      );
+    }
 
     this.imagesBucket =
-      this.configService.get<string>('SUPABASE_BUCKET_IMAGES') || 'products_images';
+      this.configService.get<string>('SUPABASE_BUCKET_IMAGES') ||
+      'products_images';
     this.videosBucket =
-      this.configService.get<string>('SUPABASE_BUCKET_VIDEOS') || 'products_videos';
+      this.configService.get<string>('SUPABASE_BUCKET_VIDEOS') ||
+      'products_videos';
 
     this.supabase = createClient(supabaseUrl, supabaseKey, {
       auth: { persistSession: false },
     });
 
     this.logger.log(
-      `Supabase Storage Service initialized. Buckets: Images=${this.imagesBucket}, Videos=${this.videosBucket}`
+      `Supabase Storage Service initialized. Buckets: Images=${this.imagesBucket}, Videos=${this.videosBucket}`,
     );
   }
 
@@ -63,37 +81,52 @@ export class StorageService {
   }
 
   /**
-   * Sube un archivo al bucket correspondiente (imágenes o videos)
+   * Sube un archivo al bucket correspondiente (imágenes o videos). El tipo de contenido, el
+   * bucket destino y la extensión se derivan del MIME real del archivo (validado contra una
+   * allowlist), nunca del nombre de archivo ni del mimetype declarados por el cliente.
    */
   async uploadFile(
     file: UploadedMulterFile,
-    customFolder?: string
+    customFolder?: string,
   ): Promise<UploadResult> {
+    const ext = ALLOWED_MIME_TO_EXT[file.mimetype];
+    if (!ext) {
+      throw new BadRequestException(
+        `Tipo de archivo no permitido: ${file.mimetype}. Formatos aceptados: ${Object.keys(ALLOWED_MIME_TO_EXT).join(', ')}`,
+      );
+    }
+
     const isVideo = file.mimetype.startsWith('video/');
     const bucket = isVideo ? this.videosBucket : this.imagesBucket;
     const tipo = isVideo ? 'VIDEO' : 'IMAGE';
 
-    const ext = file.originalname.split('.').pop() || (isVideo ? 'mp4' : 'jpg');
     const cleanFileName = `${Date.now()}_${Math.random().toString(36).substring(2, 9)}.${ext}`;
-    const folder = customFolder ? `${customFolder}/` : 'productos/';
-    const filePath = `${folder}${cleanFileName}`;
+    const folder = this.sanitizeFolder(customFolder);
+    const filePath = `${folder}/${cleanFileName}`;
 
-    this.logger.log(`Subiendo archivo ${file.originalname} a bucket ${bucket} en ruta ${filePath}`);
+    this.logger.log(`Subiendo archivo a bucket ${bucket} en ruta ${filePath}`);
 
     const { data, error } = await this.supabase.storage
       .from(bucket)
       .upload(filePath, file.buffer, {
         contentType: file.mimetype,
-        upsert: true,
+        upsert: false,
       });
 
     if (error) {
-      this.logger.error(`Error subiendo archivo a Supabase Storage: ${error.message}`, error);
+      this.logger.error(
+        `Error subiendo archivo a Supabase Storage: ${error.message}`,
+        error,
+      );
       throw new Error(`Error subiendo archivo a Supabase: ${error.message}`);
     }
 
     // Generar URL firmada válida por 7 días (604800 segundos)
-    const signedUrl = await this.getSignedUrl(bucket, filePath, 60 * 60 * 24 * 7);
+    const signedUrl = await this.getSignedUrl(
+      bucket,
+      filePath,
+      60 * 60 * 24 * 7,
+    );
 
     return {
       bucket,
@@ -106,12 +139,26 @@ export class StorageService {
   }
 
   /**
+   * Reduce un nombre de carpeta propuesto por el cliente a segmentos alfanuméricos seguros,
+   * sin separadores de ruta ni `..`, para que nunca escriba fuera del prefijo previsto.
+   */
+  private sanitizeFolder(customFolder?: string): string {
+    if (!customFolder) return 'productos';
+    const safe = customFolder
+      .split('/')
+      .map((segment) => segment.replace(/[^a-zA-Z0-9_-]/g, ''))
+      .filter(Boolean)
+      .join('/');
+    return safe || 'productos';
+  }
+
+  /**
    * Genera una URL firmada con tiempo de expiración (por defecto 7 días)
    */
   async getSignedUrl(
     bucket: string,
     path: string,
-    expiresInSeconds: number = 60 * 60 * 24 * 7
+    expiresInSeconds: number = 60 * 60 * 24 * 7,
   ): Promise<string> {
     try {
       const { data, error } = await this.supabase.storage
@@ -119,16 +166,23 @@ export class StorageService {
         .createSignedUrl(path, expiresInSeconds);
 
       if (error || !data?.signedUrl) {
-        this.logger.warn(`No se pudo firmar URL para ${bucket}/${path}: ${error?.message}`);
+        this.logger.warn(
+          `No se pudo firmar URL para ${bucket}/${path}: ${error?.message}`,
+        );
         // Fallback a URL pública
-        const { data: pubData } = this.supabase.storage.from(bucket).getPublicUrl(path);
+        const { data: pubData } = this.supabase.storage
+          .from(bucket)
+          .getPublicUrl(path);
         return pubData.publicUrl;
       }
 
       return data.signedUrl;
-    } catch (err: any) {
-      this.logger.error(`Error generando signed URL: ${err.message}`);
-      const { data: pubData } = this.supabase.storage.from(bucket).getPublicUrl(path);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      this.logger.error(`Error generando signed URL: ${message}`);
+      const { data: pubData } = this.supabase.storage
+        .from(bucket)
+        .getPublicUrl(path);
       return pubData.publicUrl;
     }
   }
@@ -177,18 +231,28 @@ export class StorageService {
   }
 
   /**
-   * Elimina un archivo del bucket
+   * Elimina un archivo, restringido a los buckets propios de este sistema — nunca un bucket
+   * arbitrario del proyecto Supabase (ver SEC-06 de la auditoría).
    */
   async deleteFile(bucket: string, path: string): Promise<boolean> {
+    if (bucket !== this.imagesBucket && bucket !== this.videosBucket) {
+      throw new BadRequestException(
+        `Bucket no permitido: solo se puede operar sobre '${this.imagesBucket}' o '${this.videosBucket}'`,
+      );
+    }
+
     try {
       const { error } = await this.supabase.storage.from(bucket).remove([path]);
       if (error) {
-        this.logger.warn(`Error eliminando archivo ${path} en ${bucket}: ${error.message}`);
+        this.logger.warn(
+          `Error eliminando archivo ${path} en ${bucket}: ${error.message}`,
+        );
         return false;
       }
       return true;
-    } catch (err: any) {
-      this.logger.error(`Error al borrar archivo de Supabase: ${err.message}`);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      this.logger.error(`Error al borrar archivo de Supabase: ${message}`);
       return false;
     }
   }

@@ -17,14 +17,21 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
     private prisma: PrismaService,
   ) {
     // Si JWT_PUBLIC_KEY existe (RS256), usa la clave pública en formato PEM.
-    // De lo contrario, cae en JWT_SECRET como fallback seguro de desarrollo.
+    // De lo contrario, requiere JWT_SECRET explícito — sin valor por defecto embebido
+    // (ver auth.module.ts, que ya falla en el arranque si ninguno está configurado).
     const publicKey = configService.get<string>('JWT_PUBLIC_KEY');
-    const secret = configService.get<string>('JWT_SECRET') || 'tienda360_default_dev_secret_key_change_in_prod';
+    const secret = configService.get<string>('JWT_SECRET');
+
+    if (!publicKey && !secret) {
+      throw new Error(
+        'JWT_SECRET o JWT_PUBLIC_KEY deben estar configurados. No hay valor por defecto.',
+      );
+    }
 
     super({
       jwtFromRequest: ExtractJwt.fromAuthHeaderAsBearerToken(),
       ignoreExpiration: false,
-      secretOrKey: publicKey || secret,
+      secretOrKey: (publicKey || secret) as string,
       algorithms: publicKey ? ['RS256'] : ['HS256'],
     });
   }
