@@ -4,6 +4,7 @@ import {
   ConflictException,
   BadRequestException,
 } from '@nestjs/common';
+import { Prisma, Rol } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateUsuarioDto, RolEnum } from './dto/create-usuario.dto';
 import { UpdateUsuarioDto } from './dto/update-usuario.dto';
@@ -15,13 +16,28 @@ export class UsuariosService {
   constructor(private prisma: PrismaService) {}
 
   /**
+   * Impide dejar el sistema sin ningún ADMIN activo: rechaza degradar, desactivar o eliminar
+   * al último administrador activo restante (ver hallazgo SEC-14 de la auditoría).
+   */
+  private async assertNotLastActiveAdmin(userId: string, accion: string) {
+    const otrosAdminsActivos = await this.prisma.usuario.count({
+      where: { rol: Rol.ADMIN, activo: true, NOT: { id: userId } },
+    });
+    if (otrosAdminsActivos === 0) {
+      throw new BadRequestException(
+        `No se puede ${accion} al único administrador activo del sistema. Crea o activa otro ADMIN primero.`,
+      );
+    }
+  }
+
+  /**
    * Listado paginado y filtrado de usuarios registrados con métricas
    */
   async findAll(query: QueryUsuarioDto) {
     const { page = 1, limit = 50, search, rol } = query;
     const skip = (page - 1) * limit;
 
-    const where: any = {};
+    const where: Prisma.UsuarioWhereInput = {};
 
     if (search && search.trim()) {
       const term = search.trim();
@@ -32,7 +48,7 @@ export class UsuariosService {
     }
 
     if (rol) {
-      where.rol = rol as any;
+      where.rol = Rol[rol];
     }
 
     const [items, total, countAdmin, countCliente, countVendedor, countBodega] =
@@ -58,10 +74,10 @@ export class UsuariosService {
           },
         }),
         this.prisma.usuario.count({ where }),
-        this.prisma.usuario.count({ where: { rol: 'ADMIN' as any } }),
-        this.prisma.usuario.count({ where: { rol: 'CLIENTE' as any } }),
-        this.prisma.usuario.count({ where: { rol: 'VENDEDOR' as any } }),
-        this.prisma.usuario.count({ where: { rol: 'BODEGA' as any } }),
+        this.prisma.usuario.count({ where: { rol: Rol.ADMIN } }),
+        this.prisma.usuario.count({ where: { rol: Rol.CLIENTE } }),
+        this.prisma.usuario.count({ where: { rol: Rol.VENDEDOR } }),
+        this.prisma.usuario.count({ where: { rol: Rol.BODEGA } }),
       ]);
 
     return {
@@ -119,7 +135,9 @@ export class UsuariosService {
     });
 
     if (existing) {
-      throw new ConflictException('El correo electrónico ya está registrado en la plataforma');
+      throw new ConflictException(
+        'El correo electrónico ya está registrado en la plataforma',
+      );
     }
 
     const hashedPassword = await bcrypt.hash(dto.password, 10);
@@ -129,7 +147,7 @@ export class UsuariosService {
         nombre: dto.nombre.trim(),
         email: dto.email.toLowerCase().trim(),
         passwordHash: hashedPassword,
-        rol: (dto.rol || RolEnum.CLIENTE) as any,
+        rol: Rol[dto.rol || RolEnum.CLIENTE],
         activo: dto.activo !== undefined ? dto.activo : true,
       },
       select: {
@@ -156,7 +174,7 @@ export class UsuariosService {
       throw new NotFoundException(`Usuario con ID ${id} no encontrado`);
     }
 
-    const dataToUpdate: any = {};
+    const dataToUpdate: Prisma.UsuarioUpdateInput = {};
 
     if (dto.nombre) {
       dataToUpdate.nombre = dto.nombre.trim();
@@ -167,7 +185,9 @@ export class UsuariosService {
         where: { email: dto.email.toLowerCase().trim() },
       });
       if (emailTaken) {
-        throw new ConflictException('El correo electrónico ya está en uso por otro usuario');
+        throw new ConflictException(
+          'El correo electrónico ya está en uso por otro usuario',
+        );
       }
       dataToUpdate.email = dto.email.toLowerCase().trim();
     }
@@ -176,8 +196,17 @@ export class UsuariosService {
       dataToUpdate.passwordHash = await bcrypt.hash(dto.password, 10);
     }
 
+    const dejaDeSerAdminActivo =
+      user.rol === Rol.ADMIN &&
+      user.activo &&
+      ((dto.rol && dto.rol !== RolEnum.ADMIN) || dto.activo === false);
+
+    if (dejaDeSerAdminActivo) {
+      await this.assertNotLastActiveAdmin(id, 'modificar el rol o desactivar');
+    }
+
     if (dto.rol) {
-      dataToUpdate.rol = dto.rol as any;
+      dataToUpdate.rol = Rol[dto.rol];
     }
 
     if (dto.activo !== undefined) {
@@ -209,6 +238,10 @@ export class UsuariosService {
 
     if (!user) {
       throw new NotFoundException(`Usuario con ID ${id} no encontrado`);
+    }
+
+    if (user.rol === Rol.ADMIN && user.activo) {
+      await this.assertNotLastActiveAdmin(id, 'desactivar');
     }
 
     return this.prisma.usuario.update({
@@ -246,8 +279,12 @@ export class UsuariosService {
 
     if (user._count.movimientos > 0) {
       throw new BadRequestException(
-        `No se puede eliminar el usuario porque tiene ${user._count.movimientos} movimientos de inventario registrados. En su lugar, desactiva la cuenta.`
+        `No se puede eliminar el usuario porque tiene ${user._count.movimientos} movimientos de inventario registrados. En su lugar, desactiva la cuenta.`,
       );
+    }
+
+    if (user.rol === Rol.ADMIN && user.activo) {
+      await this.assertNotLastActiveAdmin(id, 'eliminar');
     }
 
     await this.prisma.usuario.delete({

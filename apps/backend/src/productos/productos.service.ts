@@ -4,10 +4,19 @@ import {
   ConflictException,
   BadRequestException,
 } from '@nestjs/common';
+import { Prisma, MovimientoTipo } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { StorageService } from '../storage/storage.service';
 import { CreateProductoDto } from './dto/create-producto.dto';
 import { UpdateProductoDto } from './dto/update-producto.dto';
+
+type PrismaClientOrTx = PrismaService | Prisma.TransactionClient;
+
+// El timeout por defecto de Prisma (5s) se agota fácilmente en una transacción con varias
+// escrituras secuenciales (producto + imágenes + variantes + precios + stock) contra una base
+// de datos remota con latencia de red real — verificado en runtime contra Supabase (pooler en
+// otra región): con 1 sola variante ya tomó 5.16s y disparó P2028 "Transaction already closed".
+const TRANSACTION_OPTIONS = { timeout: 20000 };
 
 @Injectable()
 export class ProductosService {
@@ -16,27 +25,33 @@ export class ProductosService {
     private storageService: StorageService,
   ) {}
 
-  async create(dto: CreateProductoDto) {
+  async create(dto: CreateProductoDto, usuarioId: string) {
     // 1. Validar categoría
     const categoria = await this.prisma.categoria.findUnique({
       where: { id: dto.categoriaId },
     });
     if (!categoria) {
-      throw new NotFoundException(`Categoría con ID ${dto.categoriaId} no encontrada`);
+      throw new NotFoundException(
+        `Categoría con ID ${dto.categoriaId} no encontrada`,
+      );
     }
 
     // 2. Validar que no haya SKUs duplicados en base de datos
     const skuCodes = dto.variantes.map((v) => v.skuCode);
     const uniqueCodes = new Set(skuCodes);
     if (uniqueCodes.size !== skuCodes.length) {
-      throw new BadRequestException('Existen códigos SKU duplicados en la lista de variantes enviada');
+      throw new BadRequestException(
+        'Existen códigos SKU duplicados en la lista de variantes enviada',
+      );
     }
 
     const existingSku = await this.prisma.varianteSku.findFirst({
       where: { skuCode: { in: skuCodes } },
     });
     if (existingSku) {
-      throw new ConflictException(`El SKU '${existingSku.skuCode}' ya existe en el sistema`);
+      throw new ConflictException(
+        `El SKU '${existingSku.skuCode}' ya existe en el sistema`,
+      );
     }
 
     // 3. Crear Producto, Imágenes, Variantes, Precios y Stock Inicial en una transacción atómica
@@ -80,8 +95,8 @@ export class ProductosService {
           varianteDto.imagenes && varianteDto.imagenes.length > 0
             ? varianteDto.imagenes
             : varianteDto.imagenUrl
-            ? [varianteDto.imagenUrl]
-            : [];
+              ? [varianteDto.imagenUrl]
+              : [];
 
         for (let idx = 0; idx < mediaList.length; idx++) {
           await tx.imagenProducto.create({
@@ -106,57 +121,64 @@ export class ProductosService {
         if (varianteDto.stockInicial && Number(varianteDto.stockInicial) > 0) {
           let ubicacionId = varianteDto.ubicacionInicialId;
           if (!ubicacionId) {
-            const defaultUbi = await tx.ubicacion.findFirst({ orderBy: { createdAt: 'asc' } });
+            const defaultUbi = await tx.ubicacion.findFirst({
+              orderBy: { createdAt: 'asc' },
+            });
             ubicacionId = defaultUbi?.id;
           }
 
           if (ubicacionId) {
-            const adminUser = await tx.usuario.findFirst({ orderBy: { createdAt: 'asc' } });
-            const userRef = adminUser ? adminUser.id : (await tx.usuario.findFirst())?.id;
-
-            if (userRef) {
-              await tx.saldoInventario.upsert({
-                where: {
-                  varianteId_ubicacionId: {
-                    varianteId: variante.id,
-                    ubicacionId,
-                  },
-                },
-                update: {
-                  cantidad: { increment: Number(varianteDto.stockInicial) },
-                },
-                create: {
+            // Autoría del movimiento: siempre el usuario autenticado que crea el producto,
+            // nunca un usuario arbitrario resuelto por antigüedad (ver hallazgo FUN-02).
+            await tx.saldoInventario.upsert({
+              where: {
+                varianteId_ubicacionId: {
                   varianteId: variante.id,
                   ubicacionId,
-                  cantidad: Number(varianteDto.stockInicial),
                 },
-              });
+              },
+              update: {
+                cantidad: { increment: Number(varianteDto.stockInicial) },
+              },
+              create: {
+                varianteId: variante.id,
+                ubicacionId,
+                cantidad: Number(varianteDto.stockInicial),
+              },
+            });
 
-              await tx.movimientoInventario.create({
-                data: {
-                  varianteId: variante.id,
-                  ubicacionId,
-                  tipo: 'ENTRADA' as any,
-                  cantidad: Number(varianteDto.stockInicial),
-                  motivo: 'Inventario inicial al registrar prenda',
-                  usuarioId: userRef,
-                  idempotencyKey: `init-${variante.id}-${Date.now()}-${Math.random()
-                    .toString(36)
-                    .substring(2, 7)}`,
-                },
-              });
-            }
+            await tx.movimientoInventario.create({
+              data: {
+                varianteId: variante.id,
+                ubicacionId,
+                tipo: MovimientoTipo.ENTRADA,
+                cantidad: Number(varianteDto.stockInicial),
+                motivo: 'Inventario inicial al registrar prenda',
+                usuarioId,
+                idempotencyKey: `init-${variante.id}-${Date.now()}-${Math.random()
+                  .toString(36)
+                  .substring(2, 7)}`,
+              },
+            });
           }
         }
       }
 
-      return this.findOne(producto.id);
-    });
+      // Lectura final con el propio cliente de la transacción: this.prisma es una conexión
+      // distinta y no vería estas filas todavía sin confirmar (ver hallazgo FUN-01).
+      return this.findOne(producto.id, tx);
+    }, TRANSACTION_OPTIONS);
   }
 
   async findAll(page = 1, limit = 50, categoriaId?: string, search?: string) {
-    const skip = (page - 1) * limit;
-    const where: any = {};
+    // Cota superior fija: sin ella, page/limit sin validar en el controlador llegarían tal cual
+    // a skip/take de Prisma (ver hallazgo SEC-12 de la auditoría).
+    const take = Math.min(Math.max(Math.trunc(limit) || 50, 1), 100);
+    const currentPage = Math.max(Math.trunc(page) || 1, 1);
+    const skip = (currentPage - 1) * take;
+    page = currentPage;
+    limit = take;
+    const where: Prisma.ProductoWhereInput = {};
 
     if (categoriaId) {
       where.categoriaId = categoriaId;
@@ -166,7 +188,11 @@ export class ProductosService {
       where.OR = [
         { nombre: { contains: search, mode: 'insensitive' } },
         { descripcion: { contains: search, mode: 'insensitive' } },
-        { variantes: { some: { skuCode: { contains: search, mode: 'insensitive' } } } },
+        {
+          variantes: {
+            some: { skuCode: { contains: search, mode: 'insensitive' } },
+          },
+        },
       ];
     }
 
@@ -209,10 +235,12 @@ export class ProductosService {
         const imagenesFirmadas = await Promise.all(
           p.imagenes.map(async (img) => ({
             id: img.id,
-            urlStorage: await this.storageService.resolveSignedMediaUrl(img.urlStorage),
+            urlStorage: await this.storageService.resolveSignedMediaUrl(
+              img.urlStorage,
+            ),
             tipo: this.storageService.getMediaType(img.urlStorage),
             orden: img.orden,
-          }))
+          })),
         );
 
         const variantesConImg = await Promise.all(
@@ -220,10 +248,12 @@ export class ProductosService {
             const varImgsFirmadas = await Promise.all(
               (v.imagenes || []).map(async (img) => ({
                 id: img.id,
-                urlStorage: await this.storageService.resolveSignedMediaUrl(img.urlStorage),
+                urlStorage: await this.storageService.resolveSignedMediaUrl(
+                  img.urlStorage,
+                ),
                 tipo: this.storageService.getMediaType(img.urlStorage),
                 orden: img.orden,
-              }))
+              })),
             );
 
             return {
@@ -231,7 +261,7 @@ export class ProductosService {
               imagenes: varImgsFirmadas,
               imagenUrl: varImgsFirmadas[0]?.urlStorage || null,
             };
-          })
+          }),
         );
 
         return {
@@ -239,7 +269,7 @@ export class ProductosService {
           imagenes: imagenesFirmadas,
           variantes: variantesConImg,
         };
-      })
+      }),
     );
 
     return {
@@ -253,8 +283,8 @@ export class ProductosService {
     };
   }
 
-  async findOne(id: string) {
-    const producto = await this.prisma.producto.findUnique({
+  async findOne(id: string, client: PrismaClientOrTx = this.prisma) {
+    const producto = await client.producto.findUnique({
       where: { id },
       include: {
         categoria: { select: { id: true, nombre: true } },
@@ -285,10 +315,12 @@ export class ProductosService {
     const imagenesFirmadas = await Promise.all(
       producto.imagenes.map(async (img) => ({
         id: img.id,
-        urlStorage: await this.storageService.resolveSignedMediaUrl(img.urlStorage),
+        urlStorage: await this.storageService.resolveSignedMediaUrl(
+          img.urlStorage,
+        ),
         tipo: this.storageService.getMediaType(img.urlStorage),
         orden: img.orden,
-      }))
+      })),
     );
 
     const variantesConImg = await Promise.all(
@@ -296,10 +328,12 @@ export class ProductosService {
         const varImgsFirmadas = await Promise.all(
           (v.imagenes || []).map(async (img) => ({
             id: img.id,
-            urlStorage: await this.storageService.resolveSignedMediaUrl(img.urlStorage),
+            urlStorage: await this.storageService.resolveSignedMediaUrl(
+              img.urlStorage,
+            ),
             tipo: this.storageService.getMediaType(img.urlStorage),
             orden: img.orden,
-          }))
+          })),
         );
 
         return {
@@ -307,7 +341,7 @@ export class ProductosService {
           imagenes: varImgsFirmadas,
           imagenUrl: varImgsFirmadas[0]?.urlStorage || null,
         };
-      })
+      }),
     );
 
     return {
@@ -355,10 +389,10 @@ export class ProductosService {
             v.imagenes !== undefined
               ? v.imagenes
               : v.imagenUrl !== undefined
-              ? v.imagenUrl
-                ? [v.imagenUrl]
-                : []
-              : null;
+                ? v.imagenUrl
+                  ? [v.imagenUrl]
+                  : []
+                : null;
 
           if (v.id) {
             // Variante existente
@@ -399,7 +433,10 @@ export class ProductosService {
                 orderBy: { vigenteDesde: 'desc' },
               });
 
-              if (!precioActual || Number(precioActual.precio) !== Number(v.precio)) {
+              if (
+                !precioActual ||
+                Number(precioActual.precio) !== Number(v.precio)
+              ) {
                 if (precioActual) {
                   await tx.precioHistorico.update({
                     where: { id: precioActual.id },
@@ -453,8 +490,8 @@ export class ProductosService {
         }
       }
 
-      return this.findOne(id);
-    });
+      return this.findOne(id, tx);
+    }, TRANSACTION_OPTIONS);
   }
 
   async remove(id: string) {

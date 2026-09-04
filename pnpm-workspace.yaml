@@ -6,7 +6,24 @@ allowBuilds:
   '@prisma/engines': true
   '@scarf/scarf': true
   '@swc/core': true
-  bcrypt: set this to true or false
   esbuild: true
   prisma: true
   sharp: true
+# Endurecimiento de cadena de suministro (ver hallazgo SEC-17 de la auditoría / CWE-829):
+# espera 7 días antes de resolver una versión recién publicada, y nunca permite que una
+# actualización baje el nivel de confianza configurado.
+minimumReleaseAge: 10080
+trustPolicy: no-downgrade
+# Excepciones puntuales y verificadas: pnpm compara "provenance" contra TODO el historial de
+# versiones del paquete, no contra la misma línea mayor (bug documentado en pnpm/pnpm#10202).
+# Estas 3 entradas son versiones legítimas y antiguas, publicadas antes de que existiera
+# provenance, marcadas solo porque una versión NO relacionada y posterior del mismo paquete sí
+# la tiene. Verificado el 2026-09-02: el hash de integridad en pnpm-lock.yaml coincide byte a
+# byte con el que expone hoy el registro (`npm view <paquete> dist.integrity`) — no hay
+# sustitución de contenido. No confundir con la campaña activa "Shai-Hulud", que afecta a otros
+# paquetes (keyv, cacheable, debug, chalk, axios, node-ipc), no a estos tres.
+trustPolicyExclude:
+  - 'chokidar@4.0.3'
+  - 'semver@6.3.1'
+  - 'undici-types@6.21.0'
+blockExoticSubdeps: true

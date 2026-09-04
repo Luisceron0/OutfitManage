@@ -1,6 +1,15 @@
 -- ==============================================================================
 -- SCRIPT SQL DE CREACIÓN Y POBLADO DE BASE DE DATOS PARA DBEAVER (PostgreSQL)
 -- Producto: Tienda360 — SRS v1.1
+--
+-- ADVERTENCIA (2026-09-02): la fuente de verdad del esquema es
+-- apps/backend/prisma/migrations/ (Prisma Migrate), no este script. Este archivo quedó
+-- desactualizado respecto al schema real (p. ej. sus imágenes de ejemplo apuntan a
+-- res.cloudinary.com, mientras el código usa Supabase Storage) y sus hashes bcrypt de
+-- ejemplo son truncados/no funcionales. Úsalo solo como referencia rápida para poblar
+-- datos de demostración en DBeaver contra una base ya migrada con
+-- `npx prisma migrate deploy` — nunca como reemplazo de las migraciones ni como
+-- fuente del DDL en un despliegue real.
 -- ==============================================================================
 
 -- ------------------------------------------------------------------------------

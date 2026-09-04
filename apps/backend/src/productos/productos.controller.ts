@@ -1,24 +1,46 @@
-import { Controller, Get, Post, Patch, Delete, Body, Param, Query, UseGuards } from '@nestjs/common';
-import { ApiTags, ApiOperation, ApiBearerAuth, ApiQuery } from '@nestjs/swagger';
+import {
+  Controller,
+  Get,
+  Post,
+  Patch,
+  Delete,
+  Body,
+  Param,
+  Query,
+  UseGuards,
+  Req,
+} from '@nestjs/common';
+import {
+  ApiTags,
+  ApiOperation,
+  ApiBearerAuth,
+  ApiQuery,
+} from '@nestjs/swagger';
 import { ProductosService } from './productos.service';
 import { CreateProductoDto } from './dto/create-producto.dto';
 import { UpdateProductoDto } from './dto/update-producto.dto';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { RbacGuard } from '../common/guards/rbac.guard';
 import { Roles } from '../common/decorators/roles.decorator';
+import type { AuthenticatedRequest } from '../common/types/authenticated-request';
 
+// Consultar el catálogo interno está permitido a los tres roles; la gestión (crear/editar/
+// eliminar) es exclusiva de ADMIN y se declara por endpoint, que sobrescribe este default.
 @ApiTags('Productos')
 @ApiBearerAuth()
 @UseGuards(JwtAuthGuard, RbacGuard)
+@Roles('ADMIN', 'VENDEDOR', 'BODEGA')
 @Controller('api/productos')
 export class ProductosController {
   constructor(private readonly productosService: ProductosService) {}
 
   @Post()
   @Roles('ADMIN')
-  @ApiOperation({ summary: 'Crear producto con variantes y precio inicial (solo ADMIN)' })
-  create(@Body() dto: CreateProductoDto) {
-    return this.productosService.create(dto);
+  @ApiOperation({
+    summary: 'Crear producto con variantes y precio inicial (solo ADMIN)',
+  })
+  create(@Body() dto: CreateProductoDto, @Req() req: AuthenticatedRequest) {
+    return this.productosService.create(dto, req.user.id);
   }
 
   @Get()
@@ -33,7 +55,9 @@ export class ProductosController {
   }
 
   @Get(':id')
-  @ApiOperation({ summary: 'Detalle de producto con variantes, precios y saldos' })
+  @ApiOperation({
+    summary: 'Detalle de producto con variantes, precios y saldos',
+  })
   findOne(@Param('id') id: string) {
     return this.productosService.findOne(id);
   }

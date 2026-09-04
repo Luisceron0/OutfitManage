@@ -1,4 +1,8 @@
-import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
+import {
+  Injectable,
+  NotFoundException,
+  BadRequestException,
+} from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateCategoriaDto } from './dto/create-categoria.dto';
 import { UpdateCategoriaDto } from './dto/update-categoria.dto';
@@ -13,7 +17,9 @@ export class CategoriasService {
         where: { id: dto.categoriaPadreId },
       });
       if (!padre) {
-        throw new NotFoundException(`Categoría padre con ID ${dto.categoriaPadreId} no encontrada`);
+        throw new NotFoundException(
+          `Categoría padre con ID ${dto.categoriaPadreId} no encontrada`,
+        );
       }
     }
 
@@ -77,7 +83,9 @@ export class CategoriasService {
       where: { categoriaId: id },
     });
     if (prodsCount > 0) {
-      throw new BadRequestException(`No se puede eliminar la categoría "${categoria.nombre}" porque tiene ${prodsCount} prenda(s) asignadas. Reasigna las prendas primero.`);
+      throw new BadRequestException(
+        `No se puede eliminar la categoría "${categoria.nombre}" porque tiene ${prodsCount} prenda(s) asignadas. Reasigna las prendas primero.`,
+      );
     }
 
     return this.prisma.categoria.update({

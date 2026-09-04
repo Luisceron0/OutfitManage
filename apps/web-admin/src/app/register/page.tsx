@@ -12,7 +12,6 @@ export default function RegisterPage() {
   const [nombre, setNombre] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [rol, setRol] = useState('VENDEDOR');
   const [error, setError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
@@ -21,8 +20,11 @@ export default function RegisterPage() {
     setError(null);
     setIsSubmitting(true);
     try {
-      await register({ nombre, email, password, rol });
-      toast.success(`Cuenta de ${rol} creada para "${nombre}". ¡Bienvenido!`, '¡Registro Exitoso!');
+      // El registro público siempre crea una cuenta CLIENTE — el backend ignora cualquier rol
+      // enviado (SRS RF-006). Un colaborador (VENDEDOR/BODEGA/ADMIN) lo da de alta un ADMIN
+      // existente desde Usuarios, no el propio interesado.
+      await register({ nombre, email, password });
+      toast.success(`Cuenta creada para "${nombre}". Un administrador debe asignarte un rol de personal desde Usuarios.`, '¡Registro Exitoso!');
     } catch (err: any) {
       setError(err.message || 'Error al registrar usuario');
       toast.error(err.message || 'Error al registrar usuario');
@@ -111,32 +113,6 @@ export default function RegisterPage() {
                   placeholder="Mínimo 6 caracteres"
                   className="w-full pl-10 pr-4 py-2.5 rounded-xl text-sm bg-slate-900/90 border border-slate-800 focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 outline-none transition-all placeholder:text-slate-600 text-white"
                 />
-              </div>
-            </div>
-
-            <div className="space-y-1.5">
-              <label className="text-xs font-bold text-slate-300 uppercase tracking-wider">
-                Rol Asignado
-              </label>
-              <div className="grid grid-cols-3 gap-2">
-                {[
-                  { value: 'VENDEDOR', label: 'Vendedor' },
-                  { value: 'BODEGA', label: 'Bodega' },
-                  { value: 'ADMIN', label: 'Admin' },
-                ].map((r) => (
-                  <button
-                    key={r.value}
-                    type="button"
-                    onClick={() => setRol(r.value)}
-                    className={`py-2 px-3 rounded-xl text-xs font-bold transition-all border ${
-                      rol === r.value
-                        ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500 shadow-md'
-                        : 'bg-slate-900 text-slate-400 border-slate-800 hover:border-slate-700'
-                    }`}
-                  >
-                    {r.label}
-                  </button>
-                ))}
               </div>
             </div>
 

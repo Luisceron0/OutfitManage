@@ -1,4 +1,13 @@
-import { Controller, Get, Post, Patch, Delete, Body, Param, UseGuards } from '@nestjs/common';
+import {
+  Controller,
+  Get,
+  Post,
+  Patch,
+  Delete,
+  Body,
+  Param,
+  UseGuards,
+} from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import { UbicacionesService } from './ubicaciones.service';
 import { CreateUbicacionDto } from './dto/create-ubicacion.dto';
@@ -10,6 +19,7 @@ import { Roles } from '../common/decorators/roles.decorator';
 @ApiTags('Ubicaciones')
 @ApiBearerAuth()
 @UseGuards(JwtAuthGuard, RbacGuard)
+@Roles('ADMIN', 'VENDEDOR', 'BODEGA')
 @Controller('api/ubicaciones')
 export class UbicacionesController {
   constructor(private readonly ubicacionesService: UbicacionesService) {}

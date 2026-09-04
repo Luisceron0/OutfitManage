@@ -1,4 +1,8 @@
-import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
+import {
+  Injectable,
+  NotFoundException,
+  BadRequestException,
+} from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateUbicacionDto } from './dto/create-ubicacion.dto';
 import { UpdateUbicacionDto } from './dto/update-ubicacion.dto';
@@ -56,7 +60,9 @@ export class UbicacionesService {
       where: { ubicacionId: id, cantidad: { gt: 0 } },
     });
     if (tieneStock) {
-      throw new BadRequestException('No se puede eliminar una sede que tiene prendas en stock. Traslada el inventario primero.');
+      throw new BadRequestException(
+        'No se puede eliminar una sede que tiene prendas en stock. Traslada el inventario primero.',
+      );
     }
 
     // Soft delete para mantener auditoría de movimientos históricos

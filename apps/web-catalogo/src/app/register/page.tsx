@@ -13,7 +13,6 @@ import {
   User,
   Loader2,
   ArrowRight,
-  Shield,
   Store,
   Sun,
   Moon,
@@ -27,7 +26,6 @@ export default function RegisterPage() {
   const [nombre, setNombre] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [rol, setRol] = useState('CLIENTE');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -37,7 +35,9 @@ export default function RegisterPage() {
     setLoading(true);
 
     try {
-      const user = await register({ nombre, email, password, rol });
+      // El registro público siempre crea una cuenta CLIENTE — el backend ignora cualquier
+      // rol enviado (ver SRS RF-006). El personal se crea desde el panel de administración.
+      const user = await register({ nombre, email, password });
       toast.success(
         `¡Cuenta creada exitosamente, ${user.nombre}! Redirigiendo...`,
         'Registro Completado'
@@ -147,23 +147,6 @@ export default function RegisterPage() {
                   placeholder="Mínimo 6 caracteres"
                   className="w-full pl-10 pr-4 py-2.5 rounded-xl text-xs sm:text-sm bg-slate-50 dark:bg-slate-950/80 border border-slate-300 dark:border-slate-800 focus:border-blue-500 focus:bg-white dark:focus:bg-slate-950 outline-none text-slate-900 dark:text-white placeholder:text-slate-400 dark:placeholder:text-slate-600 transition-colors"
                 />
-              </div>
-            </div>
-
-            <div className="space-y-1.5">
-              <label className="text-xs font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider font-mono">
-                Tipo de Cuenta / Rol
-              </label>
-              <div className="relative">
-                <Shield className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
-                <select
-                  value={rol}
-                  onChange={(e) => setRol(e.target.value)}
-                  className="w-full pl-10 pr-4 py-2.5 rounded-xl text-xs sm:text-sm bg-slate-50 dark:bg-slate-950/80 border border-slate-300 dark:border-slate-800 focus:border-blue-500 outline-none text-slate-900 dark:text-white"
-                >
-                  <option value="CLIENTE">Cliente / Usuario Final (Tienda Virtual)</option>
-                  <option value="ADMIN">Administrador (Panel de Control /admin)</option>
-                </select>
               </div>
             </div>
 

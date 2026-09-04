@@ -1,5 +1,6 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { StorageService } from '../storage/storage.service';
 import { QueryCatalogoDto } from './dto/query-catalogo.dto';
@@ -21,7 +22,7 @@ export class CatalogoService {
     const limit = query.limit || 12;
     const skip = (page - 1) * limit;
 
-    const where: any = {
+    const where: Prisma.ProductoWhereInput = {
       visiblePublico: true,
     };
 
@@ -40,8 +41,12 @@ export class CatalogoService {
       where.variantes = {
         some: {
           activo: true,
-          ...(query.talla ? { talla: { equals: query.talla, mode: 'insensitive' } } : {}),
-          ...(query.color ? { color: { equals: query.color, mode: 'insensitive' } } : {}),
+          ...(query.talla
+            ? { talla: { equals: query.talla, mode: 'insensitive' } }
+            : {}),
+          ...(query.color
+            ? { color: { equals: query.color, mode: 'insensitive' } }
+            : {}),
         },
       };
     }
@@ -103,7 +108,8 @@ export class CatalogoService {
     // Sanitización y resolución de URLs firmadas
     const items = await Promise.all(
       productos.map(async (p) => {
-        const primerPrecio = p.variantes.find((v) => v.precios.length > 0)?.precios[0]?.precio;
+        const primerPrecio = p.variantes.find((v) => v.precios.length > 0)
+          ?.precios[0]?.precio;
 
         const rawImg = p.imagenes[0]?.urlStorage || null;
         const imagenPrincipal = rawImg
@@ -114,10 +120,12 @@ export class CatalogoService {
           p.variantes.map(async (v) => {
             const varImgsFirmadas = await Promise.all(
               (v.imagenes || []).map(async (img) => ({
-                url: await this.storageService.resolveSignedMediaUrl(img.urlStorage),
+                url: await this.storageService.resolveSignedMediaUrl(
+                  img.urlStorage,
+                ),
                 tipo: this.storageService.getMediaType(img.urlStorage),
                 orden: img.orden,
-              }))
+              })),
             );
 
             const stockTotal = v.saldos.reduce((sum, s) => sum + s.cantidad, 0);
@@ -131,15 +139,16 @@ export class CatalogoService {
               imagenes: varImgsFirmadas,
               imagenUrl: varImgsFirmadas[0]?.url || null,
               disponible: stockTotal > 0,
+              // Solo estado categórico, nunca la cantidad exacta (SRS 6.5: el catálogo
+              // público oculta cantidades de stock y costos).
               stockStatus:
                 stockTotal === 0
                   ? 'OUT_OF_STOCK'
                   : stockTotal <= 3
-                  ? 'LOW_STOCK'
-                  : 'IN_STOCK',
-              stockRestante: stockTotal <= 3 && stockTotal > 0 ? stockTotal : null,
+                    ? 'LOW_STOCK'
+                    : 'IN_STOCK',
             };
-          })
+          }),
         );
 
         return {
@@ -151,7 +160,7 @@ export class CatalogoService {
           imagenPrincipal,
           variantes: variantesPublicas,
         };
-      })
+      }),
     );
 
     return {
@@ -223,31 +232,38 @@ export class CatalogoService {
     });
 
     if (!producto) {
-      throw new NotFoundException(`Producto no encontrado o no disponible en el catálogo`);
+      throw new NotFoundException(
+        `Producto no encontrado o no disponible en el catálogo`,
+      );
     }
 
-    const primerPrecio = producto.variantes.find((v) => v.precios.length > 0)?.precios[0]?.precio;
+    const primerPrecio = producto.variantes.find((v) => v.precios.length > 0)
+      ?.precios[0]?.precio;
 
     const imagenesFirmadas = await Promise.all(
       producto.imagenes.map(async (img) => {
-        const resolved = await this.storageService.resolveSignedMediaUrl(img.urlStorage);
+        const resolved = await this.storageService.resolveSignedMediaUrl(
+          img.urlStorage,
+        );
         return {
           url: resolved,
           urlStorage: resolved,
           tipo: this.storageService.getMediaType(img.urlStorage),
           orden: img.orden,
         };
-      })
+      }),
     );
 
     const variantesPublicas = await Promise.all(
       producto.variantes.map(async (v) => {
         const varImgsFirmadas = await Promise.all(
           (v.imagenes || []).map(async (img) => ({
-            url: await this.storageService.resolveSignedMediaUrl(img.urlStorage),
+            url: await this.storageService.resolveSignedMediaUrl(
+              img.urlStorage,
+            ),
             tipo: this.storageService.getMediaType(img.urlStorage),
             orden: img.orden,
-          }))
+          })),
         );
 
         const stockTotal = v.saldos.reduce((sum, s) => sum + s.cantidad, 0);
@@ -266,16 +282,22 @@ export class CatalogoService {
             stockTotal === 0
               ? 'OUT_OF_STOCK'
               : stockTotal <= 3
-              ? 'LOW_STOCK'
-              : 'IN_STOCK',
+                ? 'LOW_STOCK'
+                : 'IN_STOCK',
           stockRestante: stockTotal <= 3 && stockTotal > 0 ? stockTotal : null,
         };
-      })
+      }),
     );
 
     // Generación server-side del Deep Link de WhatsApp (SRS 6.5)
-    const phone = this.configService.get<string>('TIENDA_WHATSAPP_PHONE', '573001234567');
-    const tiendaNombre = this.configService.get<string>('TIENDA_NOMBRE', 'Tienda360');
+    const phone = this.configService.get<string>(
+      'TIENDA_WHATSAPP_PHONE',
+      '573001234567',
+    );
+    const tiendaNombre = this.configService.get<string>(
+      'TIENDA_NOMBRE',
+      'Tienda360',
+    );
     const mensaje = `¡Hola ${tiendaNombre}! Estoy interesado(a) en el producto *${producto.nombre}* que vi en su catálogo virtual. ¿Está disponible?`;
     const whatsappLink = `https://wa.me/${phone.replace(/[^0-9]/g, '')}?text=${encodeURIComponent(mensaje)}`;
 

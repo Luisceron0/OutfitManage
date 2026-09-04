@@ -11,10 +11,14 @@ export class CatalogoController {
   @Get('catalogo')
   @ApiOperation({
     summary: 'Catálogo público de productos',
-    description: 'Listado público de productos con filtros por categoría, talla, color y búsqueda. '
-      + 'No requiere autenticación. Oculta cantidades de stock y costos por seguridad (SRS 6.5).',
+    description:
+      'Listado público de productos con filtros por categoría, talla, color y búsqueda. ' +
+      'No requiere autenticación. Oculta cantidades de stock y costos por seguridad (SRS 6.5).',
   })
-  @ApiResponse({ status: 200, description: 'Listado paginado de productos para vitrina' })
+  @ApiResponse({
+    status: 200,
+    description: 'Listado paginado de productos para vitrina',
+  })
   getCatalogo(@Query() query: QueryCatalogoDto) {
     return this.catalogoService.getCatalogo(query);
   }
@@ -22,10 +26,17 @@ export class CatalogoController {
   @Get('productos/:id')
   @ApiOperation({
     summary: 'Ficha pública de producto',
-    description: 'Detalle de producto con galería de imágenes, variantes disponibles y enlace directo a WhatsApp.',
+    description:
+      'Detalle de producto con galería de imágenes, variantes disponibles y enlace directo a WhatsApp.',
   })
-  @ApiResponse({ status: 200, description: 'Detalle de producto con WhatsApp link' })
-  @ApiResponse({ status: 404, description: 'Producto no encontrado o no visible' })
+  @ApiResponse({
+    status: 200,
+    description: 'Detalle de producto con WhatsApp link',
+  })
+  @ApiResponse({
+    status: 404,
+    description: 'Producto no encontrado o no visible',
+  })
   getProductoDetalle(@Param('id') id: string) {
     return this.catalogoService.getProductoDetalle(id);
   }
@@ -33,7 +44,8 @@ export class CatalogoController {
   @Get('categorias')
   @ApiOperation({
     summary: 'Categorías para filtros del catálogo',
-    description: 'Lista de categorías con conteo de productos visibles para renderizar menús de navegación.',
+    description:
+      'Lista de categorías con conteo de productos visibles para renderizar menús de navegación.',
   })
   @ApiResponse({ status: 200, description: 'Lista de categorías públicas' })
   getCategoriasPublicas() {

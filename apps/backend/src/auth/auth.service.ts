@@ -1,13 +1,19 @@
-import { Injectable, UnauthorizedException, ConflictException, OnModuleInit, Logger } from '@nestjs/common';
+import {
+  Injectable,
+  UnauthorizedException,
+  ConflictException,
+  Logger,
+} from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
+import { Rol } from '@prisma/client';
 import * as bcrypt from 'bcryptjs';
 import { PrismaService } from '../prisma/prisma.service';
 import { LoginDto } from './dto/login.dto';
 import { RegisterDto } from './dto/register.dto';
 
 @Injectable()
-export class AuthService implements OnModuleInit {
+export class AuthService {
   private readonly logger = new Logger(AuthService.name);
 
   constructor(
@@ -16,84 +22,42 @@ export class AuthService implements OnModuleInit {
     private configService: ConfigService,
   ) {}
 
-  async onModuleInit() {
-    await this.seedDefaultAdmin();
-  }
-
   /**
-   * Garantiza la existencia de un usuario Administrador por defecto para acceso inicial
-   */
-  async seedDefaultAdmin() {
-    try {
-      const adminExists = await this.prisma.usuario.findFirst({
-        where: { rol: 'ADMIN' as any },
-      });
-
-      if (!adminExists) {
-        const hashedPassword = await bcrypt.hash('admin123', 10);
-        await this.prisma.usuario.create({
-          data: {
-            nombre: 'Administrador Principal',
-            email: 'admin@tienda360.com',
-            passwordHash: hashedPassword,
-            rol: 'ADMIN' as any,
-            activo: true,
-          },
-        });
-        this.logger.log('✅ Usuario Administrador por defecto creado: admin@tienda360.com / admin123');
-      }
-
-      const clienteExists = await this.prisma.usuario.findFirst({
-        where: { email: 'cliente@tienda360.com' },
-      });
-
-      if (!clienteExists) {
-        const hashedClientPassword = await bcrypt.hash('cliente123', 10);
-        await this.prisma.usuario.create({
-          data: {
-            nombre: 'Cliente Tienda',
-            email: 'cliente@tienda360.com',
-            passwordHash: hashedClientPassword,
-            rol: 'CLIENTE' as any,
-            activo: true,
-          },
-        });
-        this.logger.log('✅ Usuario Cliente por defecto creado: cliente@tienda360.com / cliente123');
-      }
-    } catch (error) {
-      this.logger.warn('Aviso al verificar/crear usuarios por defecto: ' + error.message);
-    }
-  }
-
-  /**
-   * Registro de nuevos usuarios con contraseña hasheada en bcrypt
+   * Registro público. Nunca acepta un rol del llamador: RegisterDto no expone ese campo. La
+   * creación de personal (ADMIN, VENDEDOR, BODEGA) para operación normal es exclusiva de
+   * `POST /api/usuarios`, protegido por rol ADMIN — pero esa misma exclusividad crea un
+   * problema de arranque: en una instalación nueva no existe ningún ADMIN que pueda crear al
+   * primero. Por eso, y solo por eso, el servidor —nunca el llamador— asigna ADMIN de forma
+   * automática cuando la base de datos no tiene ningún usuario todavía.
+   *
+   * Esto es distinto del hallazgo original (SEC-01): allá el cliente elegía el rol via el
+   * body; aquí el rol lo decide el servidor a partir de una condición que el cliente no
+   * controla (el conteo de usuarios existentes). Ventana de carrera aceptada: si dos registros
+   * concurrentes llegan mientras la tabla está vacía, ambos podrían quedar como ADMIN — un
+   * escenario que solo puede ocurrir en el primer arranque de una instalación, nunca después.
    */
   async register(registerDto: RegisterDto) {
-    const { nombre, email, password, rol } = registerDto;
+    const { nombre, email, password } = registerDto;
 
-    // Verificar si el correo ya está registrado
     const existingUser = await this.prisma.usuario.findUnique({
       where: { email: email.toLowerCase().trim() },
     });
 
     if (existingUser) {
-      throw new ConflictException('El correo electrónico ya se encuentra registrado');
+      throw new ConflictException(
+        'El correo electrónico ya se encuentra registrado',
+      );
     }
 
-    // Hashear contraseña
     const hashedPassword = await bcrypt.hash(password, 10);
+    const esInstalacionNueva = (await this.prisma.usuario.count()) === 0;
 
-    // Si es el primer usuario de la base de datos, asignarle rol ADMIN automáticamente
-    const userCount = await this.prisma.usuario.count();
-    const assignedRole = userCount === 0 ? 'ADMIN' : (rol || 'VENDEDOR');
-
-    // Crear usuario
     const newUser = await this.prisma.usuario.create({
       data: {
         nombre: nombre.trim(),
         email: email.toLowerCase().trim(),
         passwordHash: hashedPassword,
-        rol: assignedRole as any,
+        rol: esInstalacionNueva ? Rol.ADMIN : Rol.CLIENTE,
         activo: true,
       },
     });
@@ -121,35 +85,29 @@ export class AuthService implements OnModuleInit {
   }
 
   /**
-   * Inicio de sesión con verificación de credenciales
+   * Inicio de sesión con verificación de credenciales. Respuesta uniforme ante usuario
+   * inexistente o password incorrecta, para prevenir enumeración (SRS 6.5).
    */
-  async login(loginDto: LoginDto) {
+  async login(loginDto: LoginDto, ip?: string) {
     const { email, password } = loginDto;
 
-    // Buscar usuario por correo
     const user = await this.prisma.usuario.findUnique({
       where: { email: email.toLowerCase().trim() },
     });
 
-    // REGLA DE SEGURIDAD (SRS v1.1 / Sección 6.5): Respuesta uniforme ante usuario no existente o password incorrecta
-    if (!user || !user.activo) {
+    // bcrypt.compare devuelve false de forma segura ante cualquier hash que no sea bcrypt,
+    // así que no hay fallback de comparación en texto plano ni rama alternativa.
+    const isPasswordValid = user
+      ? await bcrypt.compare(password, user.passwordHash)
+      : false;
+
+    if (!user || !user.activo || !isPasswordValid) {
+      this.logSecurityEvent('warn', 'auth.login.failed', { ip });
       throw new UnauthorizedException('Credenciales de acceso inválidas');
     }
 
-    // Verificar contraseña con bcrypt
-    let isPasswordValid = false;
-    if (user.passwordHash.startsWith('$2b$') || user.passwordHash.startsWith('$2a$')) {
-      isPasswordValid = await bcrypt.compare(password, user.passwordHash);
-    } else {
-      // Fallback para usuarios iniciales o semillas en texto plano en desarrollo
-      isPasswordValid = password === user.passwordHash;
-    }
+    this.logSecurityEvent('log', 'auth.login.success', { ip, userId: user.id });
 
-    if (!isPasswordValid) {
-      throw new UnauthorizedException('Credenciales de acceso inválidas');
-    }
-
-    // Payload de JWT
     const payload = {
       sub: user.id,
       email: user.email,
@@ -169,5 +127,17 @@ export class AuthService implements OnModuleInit {
       tokenType: 'Bearer',
       expiresIn: this.configService.get<string>('JWT_ACCESS_EXPIRATION', '15m'),
     };
+  }
+
+  /**
+   * Log estructurado de eventos de autenticación (SRS: política de logging de seguridad).
+   * Nunca incluye password ni token, solo IP, timestamp implícito del logger y, si aplica, userId.
+   */
+  private logSecurityEvent(
+    level: 'log' | 'warn',
+    event: string,
+    data: Record<string, unknown>,
+  ) {
+    this.logger[level](JSON.stringify({ event, ...data }));
   }
 }

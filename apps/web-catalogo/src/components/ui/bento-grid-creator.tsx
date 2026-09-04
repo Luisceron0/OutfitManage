@@ -36,8 +36,9 @@ export interface BentoVariantItem {
   imagenUrl?: string | null;
   imagenes?: BentoVariantMedia[];
   disponible: boolean;
+  // Solo estado categórico: el catálogo público nunca expone la cantidad exacta de stock
+  // (SRS 6.5). El backend ya no envía un conteo numérico.
   stockStatus?: "IN_STOCK" | "LOW_STOCK" | "OUT_OF_STOCK";
-  stockRestante?: number | null;
 }
 
 export interface BentoItem {
@@ -206,11 +207,7 @@ export function BentoGridCreator({
 
   // Stock status calculation
   const isAvailable = matchedVariant ? matchedVariant.disponible : true;
-  const isLowStock =
-    matchedVariant?.stockStatus === "LOW_STOCK" ||
-    (matchedVariant?.stockRestante !== null &&
-      matchedVariant?.stockRestante !== undefined &&
-      matchedVariant.stockRestante <= 3);
+  const isLowStock = matchedVariant?.stockStatus === "LOW_STOCK";
 
   // Smart suggestions if current combination is out of stock
   const sameSizeOtherColors =
@@ -264,9 +261,7 @@ export function BentoGridCreator({
             item.variantes &&
             item.variantes.length > 0 &&
             item.variantes.every((v) => !v.disponible);
-          const hasLowStock = item.variantes?.some(
-            (v) => v.stockStatus === "LOW_STOCK" || (v.stockRestante && v.stockRestante <= 3)
-          );
+          const hasLowStock = item.variantes?.some((v) => v.stockStatus === "LOW_STOCK");
 
           return (
             <motion.div
@@ -660,9 +655,7 @@ export function BentoGridCreator({
                         <div className="p-3 rounded-2xl bg-amber-500/10 border border-amber-500/30 flex items-center gap-2 text-xs font-mono text-amber-400">
                           <Flame className="w-4 h-4 fill-current shrink-0 text-amber-400" />
                           <span>
-                            {matchedVariant?.stockRestante
-                              ? `¡Solo quedan ${matchedVariant.stockRestante} unidades en Talla ${selectedSize} (${selectedColor})!`
-                              : `¡Últimas unidades disponibles en esta combinación!`}
+                            {`¡Pocas unidades disponibles en Talla ${selectedSize} (${selectedColor})!`}
                           </span>
                         </div>
                       ) : (
